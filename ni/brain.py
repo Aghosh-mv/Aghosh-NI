@@ -173,20 +173,28 @@ class NIBrain:
         The error IS the signal that drives learning.
         """
         # Generate neural activity based on ERROR (not input!)
+        # Create neurons for ALL input keys (not just numeric)
         for key, value in input_data.items():
             neuron_id = f"error_{key}"
             if neuron_id not in self.network.neurons:
                 self.network.add_neuron(neuron_id)
 
-            # Error drives neural activity
+            # All inputs cause neural activity (error drives everything)
             if isinstance(value, (int, float)):
-                self.network.stimulate(neuron_id, error * 10.0)
+                # Numeric values: error drives activity
+                self.network.stimulate(neuron_id, error * 50.0)
+            else:
+                # Non-numeric values: still cause some activity
+                self.network.stimulate(neuron_id, error * 20.0)
 
         # Run network dynamics
         spikes = []
         for _ in range(10):
             step_spikes = self.network.step()
             spikes.extend(step_spikes)
+
+        # HEBBIAN LEARNING: Connect neurons that fire together
+        self._hebbian_connect(spikes)
 
         # Update oscillations based on error magnitude
         self.oscillations.update(dt=0.01)
@@ -212,6 +220,33 @@ class NIBrain:
         }
 
         return response
+
+    def _hebbian_connect(self, spikes: list):
+        """
+        Connect neurons that fire together.
+        "Neurons that fire together wire together."
+        """
+        # Get neurons that spiked in this step
+        spiked_neurons = [s.neuron_id for s in spikes]
+
+        # Connect pairs of neurons that fired together
+        for i in range(len(spiked_neurons)):
+            for j in range(i + 1, len(spiked_neurons)):
+                pre_id = spiked_neurons[i]
+                post_id = spiked_neurons[j]
+
+                # Check if synapse already exists
+                synapse_id = f"{pre_id}→{post_id}"
+                if synapse_id not in self.network.synapses:
+                    # Create new synapse (fire together = wire together)
+                    self.network.add_synapse(pre_id, post_id, weight=0.3)
+                    self.learning_events += 1
+
+                # Also connect in reverse direction
+                reverse_id = f"{post_id}→{pre_id}"
+                if reverse_id not in self.network.synapses:
+                    self.network.add_synapse(post_id, pre_id, weight=0.3)
+                    self.learning_events += 1
 
     def _compute_emotions(self, input_data: dict, error: float) -> list:
         """Compute emotional tags based on prediction error"""

@@ -4,14 +4,10 @@ Neural Network - NOT an Artificial Neural Network
 A network of spiking neurons connected by plastic synapses.
 No layers. No forward pass. Just neurons firing and learning.
 
-Properties:
-- Recurrent connections (can loop)
-- No designated input/output layers
-- Learning happens continuously
-- Behavior emerges from dynamics
+Uses SIMULATION TIME for all operations.
+This is critical for proper STDP and network dynamics.
 """
 
-import time
 import random
 from typing import Optional
 from .neuron import Neuron, Spike
@@ -29,13 +25,15 @@ class NeuralNetwork:
     def __init__(self):
         self.neurons: dict[str, Neuron] = {}
         self.synapses: dict[str, Synapse] = {}
-        self.time = 0.0
-        self.dt = 1.0  # Time step in ms
+        self.sim_time: float = 0.0
+        self.dt: float = 1.0  # Time step in ms
 
         # Global state
         self.total_spikes = 0
-        self.average_firing_rate = 0.0
         self.network_activity = 0.0
+
+        # Pending inputs (from stimulate calls)
+        self.pending_inputs: dict[str, float] = {}
 
     def add_neuron(self, neuron_id: str, **kwargs) -> Neuron:
         """Add a neuron to the network."""
@@ -47,7 +45,7 @@ class NeuralNetwork:
         self,
         pre_id: str,
         post_id: str,
-        weight: float = 0.5,
+        weight: float = 15.0,
         synapse_type: SynapseType = SynapseType.EXCITATORY,
     ) -> Synapse:
         """Connect two neurons."""
@@ -58,7 +56,6 @@ class NeuralNetwork:
 
         synapse_id = f"{pre_id}→{post_id}"
 
-        # Check if connection already exists
         if synapse_id in self.synapses:
             return self.synapses[synapse_id]
 
@@ -75,68 +72,74 @@ class NeuralNetwork:
 
         return synapse
 
-    def connect_mutual(
-        self,
-        id_a: str,
-        id_b: str,
-        weight: float = 0.5,
-        synapse_type: SynapseType = SynapseType.EXCITATORY,
-    ):
-        """Create bidirectional connection."""
-        self.add_synapse(id_a, id_b, weight, synapse_type)
-        self.add_synapse(id_b, id_a, weight, synapse_type)
-
     def stimulate(self, neuron_id: str, current: float):
-        """Inject current into a neuron."""
+        """Inject current into a neuron (processed in next step)."""
         if neuron_id in self.neurons:
-            self.neurons[neuron_id].receive_input(current, self.dt)
+            self.pending_inputs[neuron_id] = self.pending_inputs.get(neuron_id, 0) + current
 
     def step(self) -> list[Spike]:
         """
-        Advance network by one time step.
+        Advance network by one time step (in simulation time).
         Returns list of spikes that occurred.
         """
-        self.time += self.dt
+        self.sim_time += self.dt
         all_spikes = []
 
-        # 1. Each neuron updates based on inputs
+        # 1. Apply pending inputs
+        for neuron_id, current in self.pending_inputs.items():
+            if neuron_id in self.neurons:
+                self.neurons[neuron_id].receive_input(current, self.dt)
+        self.pending_inputs = {}
+
+        # 2. Each neuron updates based on inputs from synapses
         for neuron in self.neurons.values():
-            # Calculate total input from incoming synapses
             total_input = 0.0
+
+            # Sum inputs from all incoming synapses
             for pre_id, _ in neuron.incoming:
-                # Find synapse
                 synapse_id = f"{pre_id}→{neuron.id}"
                 if synapse_id in self.synapses:
                     syn = self.synapses[synapse_id]
-                    # If pre-synaptic neuron spiked recently, transmit
                     pre_neuron = self.neurons[pre_id]
-                    if pre_neuron.time_since_spike < 2.0:  # Spiked in last 2ms
+
+                    # Check if pre-synaptic neuron spiked recently
+                    time_since_pre_spike = self.sim_time - pre_neuron.last_spike_time
+                    if time_since_pre_spike < 3.0:  # Within 3ms window
                         total_input += syn.transmit()
 
-            # Update membrane potential
-            spiked = neuron.receive_input(total_input, self.dt)
+            # Apply input to neuron
+            neuron.receive_input(total_input, self.dt)
 
-            if spiked:
-                spike = neuron.get_spike()
+        # 3. Check for spikes
+        for neuron in self.neurons.values():
+            if neuron.step(self.dt, self.sim_time):
+                spike = neuron.get_spike(self.sim_time)
                 if spike:
                     all_spikes.append(spike)
                     self.total_spikes += 1
 
-                    # Notify post-synaptic synapses
+                    # Notify post-synaptic synapses (for STDP)
                     for post_id, _ in neuron.outgoing:
                         synapse_id = f"{neuron.id}→{post_id}"
                         if synapse_id in self.synapses:
-                            self.synapses[synapse_id].receive_pre_spike()
+                            self.synapses[synapse_id].receive_pre_spike(self.sim_time)
 
-        # 2. Update synapse statistics (STDP already happened in receive_*)
-        # Prune old spike traces
+                    # Notify pre-synaptic synapses (for STDP)
+                    for pre_id, _ in neuron.incoming:
+                        synapse_id = f"{pre_id}→{neuron.id}"
+                        if synapse_id in self.synapses:
+                            self.synapses[synapse_id].receive_post_spike(self.sim_time)
+
+        # 4. Update synapse STDP
         for syn in self.synapses.values():
-            syn.trace.prune(max_age_ms=100.0)
+            syn.update_stdp(self.sim_time)
 
-        # 3. Update network statistics
-        active_neurons = sum(1 for n in self.neurons.values() if n.time_since_spike < 10.0)
+        # 5. Update network statistics
+        active_neurons = sum(
+            1 for n in self.neurons.values()
+            if self.sim_time - n.last_spike_time < 10.0
+        )
         self.network_activity = active_neurons / max(1, len(self.neurons))
-        self.average_firing_rate = self.total_spikes / max(1, self.time)
 
         return all_spikes
 
@@ -167,7 +170,6 @@ class NeuralNetwork:
 
     def get_stats(self) -> dict:
         """Get network statistics."""
-        weights = [s.weight for s in self.synapses.values()]
         strong = sum(1 for s in self.synapses.values() if s.is_strong)
         weak = sum(1 for s in self.synapses.values() if s.is_weak)
 
@@ -179,7 +181,7 @@ class NeuralNetwork:
             'total_spikes': self.total_spikes,
             'strong_synapses': strong,
             'weak_synapses': weak,
-            'time': self.time,
+            'sim_time': self.sim_time,
         }
 
     def __repr__(self):
@@ -187,5 +189,6 @@ class NeuralNetwork:
             f"NeuralNetwork("
             f"neurons={self.neuron_count}, "
             f"synapses={self.synapse_count}, "
-            f"activity={self.network_activity:.3f})"
+            f"activity={self.network_activity:.3f}, "
+            f"sim_time={self.sim_time:.1f})"
         )

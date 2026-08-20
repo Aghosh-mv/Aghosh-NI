@@ -4,18 +4,13 @@ Spiking Neuron - The Fundamental Unit
 Not an artificial neuron. Not a perceptron.
 A spiking neuron that fires action potentials.
 
-Biologically inspired:
-- Membrane potential dynamics
-- Refractory period
-- Spike-timing-dependent plasticity
-- Chemical modulation
+Uses SIMULATION TIME, not real time.
+This is critical - the brain runs in its own time.
 """
 
-import time
 import math
 from dataclasses import dataclass, field
 from typing import Optional
-import random
 
 
 @dataclass
@@ -28,77 +23,76 @@ class Spike:
 
 class Neuron:
     """
-    A spiking neuron.
+    A spiking neuron with leaky integrate-and-fire dynamics.
 
-    Dynamics:
-    - Membrane potential accumulates input
-    - When threshold is reached, FIRES (spike)
-    - After firing, enters refractory period
-    - Potential decays over time (leaky)
+    Uses simulation time (not real time).
+    This allows the brain to run at any speed.
     """
 
     def __init__(
         self,
         neuron_id: str,
-        threshold: float = -55.0,      # mV, spike threshold
-        resting: float = -70.0,         # mV, resting potential
-        reset: float = -75.0,           # mV, post-spike reset
-        tau_membrane: float = 20.0,     # ms, membrane time constant
-        refractory_time: float = 2.0,   # ms, absolute refractory period
+        threshold: float = -55.0,
+        resting: float = -70.0,
+        reset: float = -75.0,
+        tau_membrane: float = 20.0,
+        refractory_steps: int = 3,
     ):
         self.id = neuron_id
         self.threshold = threshold
         self.resting = resting
         self.reset = reset
         self.tau_membrane = tau_membrane
-        self.refractory_time = refractory_time
+        self.refractory_steps = refractory_steps
 
-        # State
+        # State (all in simulation time)
         self.potential = resting
-        self.last_spike_time = -1000.0  # Time of last spike
-        self.is_refractory = False
+        self.last_spike_time = -1000.0  # Simulation time of last spike
+        self.refractory_counter = 0     # Steps remaining in refractory
 
         # Connections
-        self.incoming: list[tuple[str, float]] = []  # (source_id, weight)
-        self.outgoing: list[tuple[str, float]] = []   # (target_id, weight)
+        self.incoming: list[tuple[str, float]] = []
+        self.outgoing: list[tuple[str, float]] = []
 
-        # Chemical modulation (neuromodulators affect this neuron)
+        # Neuromodulation
         self.modulation = {
-            'dopamine': 0.0,      # -1 to +1, affects plasticity
-            'serotonin': 0.0,     # -1 to +1, affects patience/threshold
-            'norepinephrine': 0.0,# -1 to +1, affects excitability
-            'acetylcholine': 0.0, # -1 to +1, affects learning rate
+            'dopamine': 0.0,
+            'serotonin': 0.0,
+            'norepinephrine': 0.0,
+            'acetylcholine': 0.0,
         }
 
         # Statistics
         self.spike_count = 0
         self.total_input = 0.0
 
-    @property
-    def time_since_spike(self) -> float:
-        return time.time() * 1000 - self.last_spike_time  # Convert to ms
+    def step(self, dt: float = 1.0, sim_time: float = 0.0) -> bool:
+        """
+        Advance neuron by one time step.
+        Returns True if neuron spiked.
+        """
+        # Handle refractory period
+        if self.refractory_counter > 0:
+            self.refractory_counter -= 1
+            return False
 
-    @property
-    def in_refractory(self) -> bool:
-        return self.time_since_spike < self.refractory_time
+        # Apply neuromodulation to threshold
+        effective_threshold = self.threshold
+        if self.modulation['norepinephrine'] > 0:
+            effective_threshold -= self.modulation['norepinephrine'] * 5.0
+        if self.modulation['serotonin'] > 0:
+            effective_threshold += self.modulation['serotonin'] * 5.0
 
-    @property
-    def firing_rate(self) -> float:
-        """Estimated firing rate in Hz."""
-        if self.spike_count < 2:
-            return 0.0
-        # Simple estimate based on recent activity
-        return min(200.0, self.spike_count / max(0.001, self.time_since_spike / 1000))
+        # Check for spike
+        if self.potential >= effective_threshold:
+            return self._fire(sim_time)
+
+        return False
 
     def receive_input(self, input_current: float, dt: float = 1.0):
-        """
-        Receive input current and update membrane potential.
-
-        Uses leaky integrate-and-fire dynamics:
-        dV/dt = -(V - V_rest) / tau + I / C
-        """
-        if self.in_refractory:
-            return False  # Don't process during refractory
+        """Receive input current and update membrane potential."""
+        if self.refractory_counter > 0:
+            return
 
         # Apply neuromodulation to input
         modulated_input = input_current * (1.0 + self.modulation['norepinephrine'] * 0.5)
@@ -111,46 +105,29 @@ class Neuron:
 
         self.total_input += abs(input_current)
 
-        # Check for spike
-        if self.potential >= self.threshold:
-            return self._fire()
-        return False
-
-    def _fire(self) -> bool:
+    def _fire(self, sim_time: float) -> bool:
         """Fire an action potential."""
         self.potential = self.reset
-        self.last_spike_time = time.time() * 1000
-        self.is_refractory = True
+        self.last_spike_time = sim_time
+        self.refractory_counter = self.refractory_steps
         self.spike_count += 1
-
-        # Release refractory after delay
-        # (In real implementation, this would be async)
         return True
 
-    def get_spike(self) -> Optional[Spike]:
-        """Get spike if neuron just fired."""
-        if self.time_since_spike < 1.0:  # Fired in last 1ms
+    def get_spike(self, sim_time: float) -> Optional[Spike]:
+        """Get spike if neuron just fired (within last 1ms of sim time)."""
+        if sim_time - self.last_spike_time < 1.0:
             return Spike(
                 neuron_id=self.id,
                 timestamp=self.last_spike_time,
-                strength=1.0
+                strength=1.0,
             )
         return None
 
     def apply_modulation(self, modulator: str, level: float):
         """Apply neuromodulator effect."""
         if modulator in self.modulation:
-            # Clamp to [-1, 1]
             self.modulation[modulator] = max(-1.0, min(1.0, level))
 
-            # Modulators affect threshold
-            if modulator == 'serotonin':
-                # Serotonin raises threshold (harder to fire = more patient)
-                self.threshold = -55.0 + self.modulation['serotonin'] * 5.0
-            elif modulator == 'norepinephrine':
-                # Norepinephrine lowers threshold (easier to fire = more alert)
-                self.threshold = -55.0 - self.modulation['norepinephrine'] * 5.0
-
     def __repr__(self):
-        state = "FIRING" if self.in_refractory else f"V={self.potential:.1f}mV"
+        state = "REFRACTORY" if self.refractory_counter > 0 else f"V={self.potential:.1f}mV"
         return f"Neuron({self.id}: {state}, spikes={self.spike_count})"
