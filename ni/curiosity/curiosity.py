@@ -1,249 +1,237 @@
 """
-Curiosity System - Deep Dive
+Curiosity System - Neural Deep Focus
 
-When the brain finds something interesting, it focuses EXCLUSIVELY.
-Not multitasking. Not scattered attention. DEEP FOCUS.
+This is not a flag. This is not a mode.
+This is actual neural architecture that creates focus.
 
-Like a child who finds a bug and watches it for an hour.
-Or a scientist obsessed with one problem.
+How it works:
+1. Novelty detector neurons fire when input is surprising
+2. These activate inhibitory interneurons
+3. Inhibitory neurons suppress ALL other neural activity
+4. Only the interesting signal remains active
+5. Brain explores from all angles
+6. When understanding achieved, inhibition lifts
 
-The brain:
-1. Detects something novel/interesting
-2. Enters "deep dive" mode
-3. Ignores everything else
-4. Explores the interesting thing from all angles
-5. Extracts maximum understanding
-6. Returns to normal when satisfied
+Architecture:
+- Novelty neurons: Fire on high prediction error
+- Inhibitory interneurons: Suppress background activity
+- Focus neurons: Represent the current focus
+- Satiety neurons: Fire when understanding is achieved
 """
 
-import time
 from dataclasses import dataclass, field
-from typing import Optional, Any
-from enum import Enum, auto
-
-
-class CuriosityState(Enum):
-    IDLE = auto()           # Normal exploration
-    DETECTED = auto()       # Something interesting found
-    FOCUSING = auto()       # Locking onto target
-    DEEP_DIVE = auto()      # Full immersion
-    SATIATED = auto()       # Understanding achieved
-    EXTRACTING = auto()     # Pulling out knowledge
+from typing import Optional
+from ..core.network import NeuralNetwork
+from ..core.neuron import Neuron, Spike
+from ..core.synapse import Synapse, SynapseType
 
 
 @dataclass
-class CuriosityTarget:
-    """Something the brain is curious about"""
+class FocusTarget:
+    """Something the brain is focused on"""
     target_id: str
-    description: str
-    novelty_score: float        # How new is this?
-    complexity_score: float     # How complex?
-    relevance_score: float      # How relevant to current goals?
-    exploration_count: int      # How many times explored
-    understanding_level: float  # How well is it understood (0-1)
-    first_encounter: float      # When first seen
-    last_exploration: float     # When last explored
-    angles_tried: list[str] = field(default_factory=list)  # What approaches tried
+    neuron_ids: list[str]       # Neurons representing this target
+    novelty_level: float        # How novel (0-1)
+    understanding_level: float  # How understood (0-1)
+    focus_start: float          # When focus started
+    exploration_count: int      # How many angles explored
+    angles_tried: list[str] = field(default_factory=list)
 
 
 class CuriositySystem:
     """
-    Curiosity-Driven Deep Dive System.
+    Real Curiosity: Neural Deep Focus.
 
-    When something is interesting, the brain LOCKS ON.
-    Everything else is ignored until understanding is achieved.
+    When something is interesting, inhibitory neurons
+    suppress ALL other activity. Only the interesting
+    signal remains. Brain explores it from all angles.
     """
 
-    def __init__(self):
-        self.state = CuriosityState.IDLE
-        self.current_target: Optional[CuriosityTarget] = None
-        self.targets: dict[str, CuriosityTarget] = {}
+    def __init__(self, base_network: NeuralNetwork):
+        self.base_network = base_network
 
-        # Curiosity parameters
-        self.novelty_threshold = 0.3     # Minimum novelty to trigger curiosity
-        self.complexity_bonus = 0.2      # Extra score for complex things
-        self.relevance_weight = 0.3      # How much relevance matters
-        self.satiety_threshold = 0.8     # Understanding level to stop
-        self.max_focus_duration = 100    # Max steps in deep dive
+        # Curiosity neurons (in base network)
+        self.novelty_neurons: list[str] = []
+        self.inhibitory_neurons: list[str] = []
+        self.focus_neurons: list[str] = []
+        self.satiety_neurons: list[str] = []
 
-        # Statistics
-        self.deep_dive_count = 0
-        self.total_focus_time = 0
-        self.knowledge_gained = 0
+        # Focus state
+        self.is_focused: bool = False
+        self.current_focus: Optional[FocusTarget] = None
+        self.focus_history: list[FocusTarget] = []
 
-        # Focus history
-        self.focus_history: list[dict] = []
+        # Parameters
+        self.novelty_threshold: float = 0.5
+        self.satiety_threshold: float = 0.8
+        self.max_focus_duration: int = 100  # steps
+        self.focus_duration: int = 0
 
-    def detect_novelty(self, input_data: dict, prediction_error: float) -> Optional[str]:
+        # Create curiosity neurons
+        self._create_curiosity_neurons()
+
+    def _create_curiosity_neurons(self):
+        """Create the neural architecture for curiosity"""
+        # Novelty detector neurons (one per input dimension)
+        for i in range(5):
+            neuron_id = f"novelty_{i}"
+            self.base_network.add_neuron(neuron_id, threshold=-60.0)
+            self.novelty_neurons.append(neuron_id)
+
+        # Inhibitory interneurons (suppress background)
+        for i in range(3):
+            neuron_id = f"inhibitory_{i}"
+            self.base_network.add_neuron(neuron_id, threshold=-65.0)
+            self.inhibitory_neurons.append(neuron_id)
+
+            # Connect to ALL other neurons (to suppress them)
+            for other_id in list(self.base_network.neurons.keys()):
+                if other_id != neuron_id and not other_id.startswith("inhibitory"):
+                    self.base_network.add_synapse(
+                        neuron_id, other_id,
+                        weight=10.0,
+                        synapse_type=SynapseType.INHIBITORY
+                    )
+
+        # Focus neurons (represent current focus)
+        for i in range(3):
+            neuron_id = f"focus_{i}"
+            self.base_network.add_neuron(neuron_id, threshold=-58.0)
+            self.focus_neurons.append(neuron_id)
+
+        # Satiety neurons (fire when understanding achieved)
+        for i in range(2):
+            neuron_id = f"satiety_{i}"
+            self.base_network.add_neuron(neuron_id, threshold=-62.0)
+            self.satiety_neurons.append(neuron_id)
+
+            # Connect satiety to inhibitory (when satiated, stop inhibiting)
+            for inhib_id in self.inhibitory_neurons:
+                self.base_network.add_synapse(
+                    neuron_id, inhib_id,
+                    weight=8.0,
+                    synapse_type=SynapseType.INHIBITORY
+                )
+
+    def detect_novelty(self, prediction_error: float) -> bool:
         """
-        Detect if something novel/interesting is present.
-        Returns target_id if something curious is found.
+        Detect if input is novel/interesting.
+        Returns True if curiosity should activate.
         """
-        # High prediction error = novelty
-        if prediction_error < self.novelty_threshold:
-            return None
-
-        # Create target ID from input
-        target_id = self._create_target_id(input_data)
-
-        # Check if already tracking this
-        if target_id in self.targets:
-            target = self.targets[target_id]
-            # Update novelty based on prediction error
-            target.novelty_score = max(target.novelty_score, prediction_error)
-            target.last_exploration = time.time()
-            return target_id
-
-        # Create new target
-        target = CuriosityTarget(
-            target_id=target_id,
-            description=str(input_data)[:100],
-            novelty_score=prediction_error,
-            complexity_score=self._estimate_complexity(input_data),
-            relevance_score=self._estimate_relevance(input_data),
-            exploration_count=0,
-            understanding_level=0.0,
-            first_encounter=time.time(),
-            last_exploration=time.time(),
-        )
-
-        self.targets[target_id] = target
-        return target_id
-
-    def should_deep_dive(self, target_id: str) -> bool:
-        """Should we enter deep dive mode for this target?"""
-        if target_id not in self.targets:
-            return False
-
-        target = self.targets[target_id]
-
-        # Already deeply diving?
-        if self.state == CuriosityState.DEEP_DIVE:
+        if prediction_error > self.novelty_threshold:
+            # Stimulate novelty neurons
+            for neuron_id in self.novelty_neurons:
+                self.base_network.stimulate(neuron_id, prediction_error * 40.0)
             return True
-
-        # Check if worth diving into
-        curiosity_score = (
-            target.novelty_score * 0.4 +
-            target.complexity_score * 0.3 +
-            target.relevance_score * self.relevance_weight
-        )
-
-        # Not understood yet?
-        if target.understanding_level < self.satiety_threshold:
-            return curiosity_score > 0.5
-
         return False
 
-    def enter_deep_dive(self, target_id: str):
-        """Enter deep dive mode"""
-        if target_id not in self.targets:
+    def activate_focus(self, target_id: str, neuron_ids: list[str]):
+        """
+        Activate deep focus mode.
+        Inhibitory neurons suppress background.
+        Only target neurons remain active.
+        """
+        self.is_focused = True
+        self.current_focus = FocusTarget(
+            target_id=target_id,
+            neuron_ids=neuron_ids,
+            novelty_level=1.0,
+            understanding_level=0.0,
+            focus_start=self.base_network.sim_time,
+            exploration_count=0,
+        )
+        self.focus_duration = 0
+
+        # Activate focus neurons
+        for neuron_id in self.focus_neurons:
+            self.base_network.stimulate(neuron_id, 30.0)
+
+        # Activate inhibitory neurons (suppress background)
+        for neuron_id in self.inhibitory_neurons:
+            self.base_network.stimulate(neuron_id, 25.0)
+
+    def maintain_focus(self):
+        """
+        Maintain focus during deep dive.
+        Called each step while focused.
+        """
+        if not self.is_focused:
             return
 
-        self.current_target = self.targets[target_id]
-        self.state = CuriosityState.DEEP_DIVE
-        self.deep_dive_count += 1
+        self.focus_duration += 1
 
-        self.focus_history.append({
-            "target": target_id,
-            "start_time": time.time(),
-            "novelty": self.current_target.novelty_score,
-        })
+        # Keep inhibitory neurons active (maintain suppression)
+        for neuron_id in self.inhibitory_neurons:
+            self.base_network.stimulate(neuron_id, 15.0)
 
-    def explore_during_dive(self, action: str, result: dict) -> dict:
+        # Keep focus neurons active
+        for neuron_id in self.focus_neurons:
+            self.base_network.stimulate(neuron_id, 10.0)
+
+        # Check if focus should end
+        if self.focus_duration >= self.max_focus_duration:
+            self.release_focus("timeout")
+        elif self.current_focus and self.current_focus.understanding_level >= self.satiety_threshold:
+            self.release_focus("understood")
+
+    def record_exploration(self, angle: str, success: bool):
+        """Record an exploration during focus"""
+        if self.current_focus:
+            self.current_focus.angles_tried.append(angle)
+            self.current_focus.exploration_count += 1
+
+            # Update understanding
+            if success:
+                self.current_focus.understanding_level = min(
+                    1.0,
+                    self.current_focus.understanding_level + 0.1
+                )
+            else:
+                # Even failures teach us something
+                self.current_focus.understanding_level = min(
+                    1.0,
+                    self.current_focus.understanding_level + 0.05
+                )
+
+            # Decrease novelty as we understand
+            self.current_focus.novelty_level *= 0.95
+
+    def release_focus(self, reason: str):
         """
-        During deep dive, explore the target from new angles.
-        Returns insights gained.
+        Release focus mode.
+        Inhibition lifts, normal activity resumes.
         """
-        if self.state != CuriosityState.DEEP_DIVE or not self.current_target:
-            return {"insight": "not_in_deep_dive"}
+        if self.current_focus:
+            self.current_focus.understanding_level = min(
+                1.0,
+                self.current_focus.understanding_level + 0.1
+            )
+            self.focus_history.append(self.current_focus)
 
-        # Record this exploration angle
-        angle = f"{action}_{len(self.current_target.angles_tried)}"
-        self.current_target.angles_tried.append(angle)
-        self.current_target.exploration_count += 1
+        self.is_focused = False
+        self.current_focus = None
+        self.focus_duration = 0
 
-        # Compute understanding gain
-        understanding_gain = self._compute_understanding_gain(result)
-        self.current_target.understanding_level = min(
-            1.0,
-            self.current_target.understanding_level + understanding_gain
-        )
-
-        # Update novelty (decreases as we understand)
-        self.current_target.novelty_score *= 0.95
-
-        # Check if satiated
-        if self.current_target.understanding_level >= self.satiety_threshold:
-            self.exit_deep_dive("understood")
-            return {"insight": "target_understood", "level": self.current_target.understanding_level}
-
-        self.total_focus_time += 1
-
-        return {
-            "insight": "exploring",
-            "angle": angle,
-            "understanding": self.current_target.understanding_level,
-            "angles_tried": len(self.current_target.angles_tried),
-        }
-
-    def exit_deep_dive(self, reason: str):
-        """Exit deep dive mode"""
-        if self.current_target:
-            self.focus_history[-1]["end_time"] = time.time()
-            self.focus_history[-1]["reason"] = reason
-            self.focus_history[-1]["understanding"] = self.current_target.understanding_level
-
-        self.state = CuriosityState.IDLE
-        self.current_target = None
-
-    def _create_target_id(self, input_data: dict) -> str:
-        """Create a unique ID for a curiosity target"""
-        # Simple ID based on input keys
-        keys = sorted(input_data.keys())
-        return f"curious_{'_'.join(keys)}"
-
-    def _estimate_complexity(self, input_data: dict) -> float:
-        """Estimate how complex something is"""
-        # More keys = more complex
-        complexity = len(input_data) * 0.1
-        # Nested structures = more complex
-        for value in input_data.values():
-            if isinstance(value, dict):
-                complexity += 0.2
-            elif isinstance(value, list):
-                complexity += 0.15
-        return min(1.0, complexity)
-
-    def _estimate_relevance(self, input_data: dict) -> float:
-        """Estimate how relevant something is"""
-        # Default: everything is somewhat relevant
-        return 0.5
-
-    def _compute_understanding_gain(self, result: dict) -> float:
-        """How much understanding did we gain from this exploration?"""
-        # More successful actions = more understanding
-        if result.get("success", False):
-            return 0.1
-        else:
-            # Even failures teach us something
-            return 0.05
+        # Activate satiety neurons (signal understanding achieved)
+        for neuron_id in self.satiety_neurons:
+            self.base_network.stimulate(neuron_id, 20.0)
 
     def get_focus_level(self) -> float:
-        """How focused is the brain right now?"""
-        if self.state == CuriosityState.DEEP_DIVE:
-            return 1.0
-        elif self.state == CuriosityState.DETECTED:
-            return 0.5
-        else:
-            return 0.0
+        """How focused is the brain? (0 = unfocused, 1 = deep focus)"""
+        if self.is_focused:
+            return min(1.0, self.focus_duration / 20.0)
+        return 0.0
 
     def get_state(self) -> dict:
         """Get curiosity system state"""
         return {
-            "state": self.state.name,
-            "current_target": self.current_target.target_id if self.current_target else None,
-            "target_count": len(self.targets),
-            "deep_dive_count": self.deep_dive_count,
-            "total_focus_time": self.total_focus_time,
+            "is_focused": self.is_focused,
             "focus_level": self.get_focus_level(),
+            "current_focus": self.current_focus.target_id if self.current_focus else None,
+            "understanding": self.current_focus.understanding_level if self.current_focus else 0.0,
+            "novelty_neurons": len(self.novelty_neurons),
+            "inhibitory_neurons": len(self.inhibitory_neurons),
+            "focus_neurons": len(self.focus_neurons),
+            "focus_history": len(self.focus_history),
+            "focus_duration": self.focus_duration,
         }

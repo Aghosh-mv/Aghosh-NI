@@ -28,6 +28,8 @@ from .emotion.amygdala import EmotionalSystem, EmotionType
 from .memory.system import MemorySystem
 from .memory.dreams import DreamSystem
 from .attention.thalamus import Thalamus
+from .curiosity.meta_cognition import MetaCognitionSystem
+from .curiosity.curiosity import CuriositySystem
 
 
 class NIBrain:
@@ -50,6 +52,11 @@ class NIBrain:
         self.memory = MemorySystem()
         self.thalamus = Thalamus()
         self.dreams = DreamSystem()
+        self.meta_cognition = MetaCognitionSystem(self.network)
+        self.curiosity = CuriositySystem(self.network)
+
+        # Create confidence/confusion trackers
+        self.meta_cognition.create_confidence_tracker()
 
         # Predictive coding system
         self.predictions: dict[str, float] = {}
@@ -89,6 +96,14 @@ class NIBrain:
         self.prediction_errors.append(error)
         if len(self.prediction_errors) > 1000:
             self.prediction_errors = self.prediction_errors[-500:]
+
+        # 3.5. CURIOSITY: Detect novelty and potentially activate deep focus
+        is_novel = self.curiosity.detect_novelty(error)
+        if is_novel and not self.curiosity.is_focused:
+            target_id = f"focus_{self.experience_count}"
+            self.curiosity.activate_focus(target_id, list(self.network.neurons.keys()))
+        elif self.curiosity.is_focused:
+            self.curiosity.maintain_focus()
 
         # 4. Thalamus receives prediction error (not raw input!)
         salience = abs(error)  # More surprising = more salient
@@ -195,6 +210,10 @@ class NIBrain:
 
         # HEBBIAN LEARNING: Connect neurons that fire together
         self._hebbian_connect(spikes)
+
+        # META-COGNITION: Monitor neural activity
+        self.meta_cognition.step()
+        self.meta_cognition.observe_prediction_error(error)
 
         # Update oscillations based on error magnitude
         self.oscillations.update(dt=0.01)
