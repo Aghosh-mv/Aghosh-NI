@@ -11,6 +11,7 @@ Components:
 - EmotionalSystem: Importance weighting
 - MemorySystem: Hippocampus + Neocortex + Cerebellum
 - Thalamus: Attention routing
+- PredictiveCoding: Error-driven learning
 
 Behavior EMERGES from mechanisms interacting.
 No central controller. No token prediction.
@@ -47,9 +48,13 @@ class NIBrain:
         self.memory = MemorySystem()
         self.thalamus = Thalamus()
 
+        # Predictive coding system
+        self.predictions: dict[str, float] = {}
+        self.prediction_errors: list[float] = []
+
         # State
         self.awake = True
-        self.consciousness_level = 0.5  # 0 = unconscious, 1 = fully conscious
+        self.consciousness_level = 0.5
         self.internal_state = "baseline"
 
         # Experience counter
@@ -59,17 +64,28 @@ class NIBrain:
     def perceive(self, input_data: dict, source: str = "external") -> dict:
         """
         Perceive input from the world.
-        This is the START of processing - not the end.
 
         Flow:
-        1. Signal enters thalamus
-        2. Thalamus gates (filters)
-        3. If attended → process
-        4. If not → inhibit
+        1. Compute prediction based on model
+        2. Compare with actual input
+        3. Compute prediction error
+        4. Only prediction error propagates (PREDICTIVE CODING)
+        5. Update model based on error
+        6. If attended → process further
         """
-        # 1. Thalamus receives signal
-        # Compute salience based on novelty and emotional content
-        salience = self._compute_salience(input_data)
+        # 1. Generate prediction (what do I EXPECT?)
+        prediction = self._generate_prediction(input_data)
+
+        # 2. Compute prediction error (what's DIFFERENT?)
+        error = self._compute_prediction_error(input_data, prediction)
+
+        # 3. Store prediction error
+        self.prediction_errors.append(error)
+        if len(self.prediction_errors) > 1000:
+            self.prediction_errors = self.prediction_errors[-500:]
+
+        # 4. Thalamus receives prediction error (not raw input!)
+        salience = abs(error)  # More surprising = more salient
         relevance = self.thalamus.compute_relevance(
             type('Signal', (), {'content': input_data})()
         )
@@ -82,211 +98,183 @@ class NIBrain:
         )
 
         if not attended:
-            # Signal was inhibited - didn't pass attention gate
             return {"status": "inhibited", "reason": "low_priority"}
 
-        # 2. Process attended signal
-        result = self._process(input_data)
+        # 5. Process prediction error through brain mechanisms
+        result = self._process_error(input_data, prediction, error)
 
-        # 3. Store in memory
-        emotional_weight = self._compute_emotional_weight(input_data)
+        # 6. Store in memory
+        emotional_weight = self._compute_emotional_weight(input_data, error)
         self.memory.experience(input_data, emotional_weight)
+
+        # 7. Update predictions (learn from error)
+        self._update_predictions(input_data, error)
 
         self.experience_count += 1
 
         return result
 
-    def _process(self, input_data: dict) -> dict:
+    def _generate_prediction(self, input_data: dict) -> dict:
         """
-        Process attended input through brain mechanisms.
-        No LLM. Just mechanisms.
+        Generate prediction based on current model.
+        This is what the brain EXPECTS to see.
         """
-        # 1. Generate neural activity based on input
-        # Map input features to neurons
+        prediction = {}
         for key, value in input_data.items():
-            neuron_id = f"input_{key}"
+            if key in self.predictions:
+                prediction[key] = self.predictions[key]
+            else:
+                # No prior prediction - predict mean
+                prediction[key] = 0.0
+        return prediction
+
+    def _compute_prediction_error(self, actual: dict, predicted: dict) -> float:
+        """
+        Compute prediction error.
+        This is the KEY insight of predictive coding:
+        Only SURPRISE propagates through the brain.
+        """
+        total_error = 0.0
+        count = 0
+
+        for key in actual:
+            if key in predicted:
+                if isinstance(actual[key], (int, float)):
+                    error = abs(actual[key] - predicted[key])
+                    total_error += error
+                    count += 1
+
+        if count == 0:
+            return 0.0
+
+        return total_error / count
+
+    def _process_error(self, input_data: dict, prediction: dict, error: float) -> dict:
+        """
+        Process prediction error through brain mechanisms.
+        The error IS the signal that drives learning.
+        """
+        # Generate neural activity based on ERROR (not input!)
+        for key, value in input_data.items():
+            neuron_id = f"error_{key}"
             if neuron_id not in self.network.neurons:
                 self.network.add_neuron(neuron_id)
 
-            # Stimulate corresponding neuron
+            # Error drives neural activity
             if isinstance(value, (int, float)):
-                self.network.stimulate(neuron_id, float(value))
-            elif isinstance(value, str):
-                # Map string to numeric stimulation
-                hash_val = hash(value) % 100 / 100.0
-                self.network.stimulate(neuron_id, hash_val * 10.0)
+                # Larger error = more neural activity
+                self.network.stimulate(neuron_id, error * 10.0)
 
-        # 2. Run network dynamics
+        # Run network dynamics
         spikes = []
-        for _ in range(10):  # 10 time steps
+        for _ in range(10):
             step_spikes = self.network.step()
             spikes.extend(step_spikes)
 
-        # 3. Update oscillations based on activity
+        # Update oscillations based on error magnitude
         self.oscillations.update(dt=0.01)
+        if error > 0.5:
+            self.oscillations.set_state("alert")
+        elif error < 0.1:
+            self.oscillations.set_state("relaxed")
 
-        # 4. Compute emotional response
-        emotional_tags = self._compute_emotions(input_data)
+        # Compute emotional response to error
+        emotional_tags = self._compute_emotions(input_data, error)
 
-        # 5. Apply neuromodulation based on state
-        self._update_neuromodulation(input_data, spikes)
+        # Apply neuromodulation based on error
+        self._update_neuromodulation(error)
 
-        # 6. Generate response based on network state
-        response = self._generate_response(spikes, emotional_tags)
-
-        return response
-
-    def _compute_salience(self, data: dict) -> float:
-        """
-        How attention-grabbing is this input?
-        Based on novelty and emotional content.
-        """
-        # Check if we've seen similar input before
-        similar_count = 0
-        for memory in self.memory.hippocampus.memories.values():
-            similarity = self.memory.hippocampus._compute_similarity(
-                memory.content, data
-            )
-            if similarity > 0.5:
-                similar_count += 1
-
-        # Novelty = inverse of familiarity
-        novelty = 1.0 / (1.0 + similar_count * 0.3)
-
-        # Check emotional content
-        emotional = 0.0
-        for key, value in data.items():
-            if isinstance(value, (int, float)):
-                emotional += abs(value) * 0.1
-
-        return min(1.0, novelty * 0.6 + emotional * 0.4)
-
-    def _compute_emotional_weight(self, data: dict) -> float:
-        """
-        How emotionally significant is this input?
-        Determines memory encoding strength.
-        """
-        # Simple heuristic: unexpected values are emotional
-        weight = 0.0
-        for key, value in data.items():
-            if isinstance(value, (int, float)):
-                # Extreme values are more emotional
-                weight += abs(value) / 100.0
-            elif isinstance(value, str):
-                # Unknown strings are novel (emotional)
-                weight += 0.1
-
-        return min(1.0, weight)
-
-    def _compute_emotions(self, data: dict) -> list:
-        """
-        Compute emotional tags for input.
-        """
-        tags = []
-
-        # Check for novelty
-        novelty = self._compute_salience(data)
-        if novelty > 0.5:
-            tag = self.emotions.tag_experience(
-                EmotionType.NOVELTY,
-                intensity=novelty,
-                valence=0.3,  # Novelty is slightly positive
-            )
-            tags.append(tag)
-
-        # Check for potential reward/punishment
-        for key, value in data.items():
-            if isinstance(value, (int, float)):
-                if value > 50:
-                    tag = self.emotions.tag_experience(
-                        EmotionType.REWARD,
-                        intensity=value / 100.0,
-                        valence=0.8,
-                    )
-                    tags.append(tag)
-                elif value < -50:
-                    tag = self.emotions.tag_experience(
-                        EmotionType.PAIN,
-                        intensity=abs(value) / 100.0,
-                        valence=-0.8,
-                    )
-                    tags.append(tag)
-
-        return tags
-
-    def _update_neuromodulation(self, data: dict, spikes: list):
-        """
-        Update neuromodulation based on experience.
-        """
-        # Norepinephrine: increase with salience
-        salience = self._compute_salience(data)
-        self.neuromodulation.release(Modulator.NOREPINEPHRINE, salience * 0.3)
-
-        # Dopamine: based on reward prediction error
-        reward = sum(
-            v for v in data.values()
-            if isinstance(v, (int, float)) and v > 0
-        )
-        if reward > 0:
-            self.neuromodulation.compute_reward_prediction_error(reward)
-
-        # Acetylcholine: increase with novelty (LEARN THIS)
-        novelty = self._compute_salience(data)
-        if novelty > 0.5:
-            self.neuromodulation.release(Modulator.ACETYLCHOLINE, 0.3)
-
-        # Apply modulation to network
-        plasticity_rate = self.neuromodulation.get_plasticity_rate()
-        for synapse in self.network.synapses.values():
-            synapse.plasticity_rate = plasticity_rate
-
-    def _generate_response(self, spikes: list, emotional_tags: list) -> dict:
-        """
-        Generate response based on current brain state.
-        Not token prediction - state-based response.
-        """
-        # Compute response based on:
-        # 1. Network activity pattern
-        # 2. Emotional state
-        # 3. Oscillation state
-        # 4. Attention focus
-
+        # Generate response
         response = {
             "status": "processed",
+            "prediction_error": error,
             "network_activity": self.network.network_activity,
             "dominant_emotion": self.emotions.get_dominant_emotion().name,
             "oscillation_state": self.oscillations.dominant_wave.name,
-            "attention_focus": self.thalamus.current_focus,
             "spike_count": len(spikes),
-            "neuromodulation": self.neuromodulation.get_state(),
         }
 
         return response
 
+    def _compute_emotions(self, input_data: dict, error: float) -> list:
+        """Compute emotional tags based on prediction error"""
+        tags = []
+
+        # High prediction error = novelty/surprise
+        if error > 0.5:
+            tag = self.emotions.tag_experience(
+                EmotionType.NOVELTY,
+                intensity=min(1.0, error),
+                valence=0.3,
+            )
+            tags.append(tag)
+
+        # Very high error = potential threat/reward
+        if error > 0.8:
+            tag = self.emotions.tag_experience(
+                EmotionType.CURIOSITY,
+                intensity=error,
+                valence=0.5,
+            )
+            tags.append(tag)
+
+        return tags
+
+    def _update_neuromodulation(self, error: float):
+        """Update neuromodulation based on prediction error"""
+        # Norepinephrine: increases with surprise
+        self.neuromodulation.release(Modulator.NOREPINEPHRINE, error * 0.3)
+
+        # Acetylcholine: increases when we should learn
+        if error > 0.3:
+            self.neuromodulation.release(Modulator.ACETYLCHOLINE, 0.3)
+
+        # Apply to network
+        plasticity_rate = self.neuromodulation.get_plasticity_rate()
+        for synapse in self.network.synapses.values():
+            synapse.plasticity_rate = plasticity_rate
+
+    def _compute_emotional_weight(self, input_data: dict, error: float) -> float:
+        """Compute emotional weight of an experience"""
+        weight = 0.1
+        if error > 0.5:
+            weight = 0.8
+        elif error > 0.3:
+            weight = 0.5
+        return weight
+
+    def _update_predictions(self, input_data: dict, error: float):
+        """
+        Update predictions based on prediction error.
+        This is HOW the brain learns:
+        - Predict
+        - Compare with reality
+        - Update prediction to reduce future error
+        """
+        learning_rate = self.neuromodulation.get_plasticity_rate() * 0.1
+
+        for key, value in input_data.items():
+            if isinstance(value, (int, float)):
+                current_pred = self.predictions.get(key, 0.0)
+                # Move prediction toward actual value
+                self.predictions[key] = current_pred + learning_rate * (value - current_pred)
+
     def think(self, duration_ms: float = 100.0) -> dict:
         """
         Think for a duration.
-        This is internal processing - no external input.
+        Internal processing - no external input.
         Just the brain running its dynamics.
         """
-        steps = int(duration_ms / 1.0)  # 1ms per step
+        steps = int(duration_ms / 1.0)
         all_spikes = []
 
         for _ in range(steps):
-            # Run network dynamics
             spikes = self.network.step()
             all_spikes.extend(spikes)
-
-            # Update oscillations
             self.oscillations.update(dt=0.001)
-
-            # Decay neuromodulation
             self.neuromodulation.decay(dt=0.001)
-
-            # Decay emotions
             self.emotions.decay(dt=0.001)
 
-        # Consolidate memories periodically
         self.memory.consolidate()
 
         return {
@@ -297,13 +285,12 @@ class NIBrain:
         }
 
     def get_state(self) -> dict:
-        """Get complete brain state."""
+        """Get complete brain state"""
         return {
             "name": self.name,
             "age": time.time() - self.born_at,
             "awake": self.awake,
             "consciousness_level": self.consciousness_level,
-            "internal_state": self.internal_state,
             "experience_count": self.experience_count,
             "learning_events": self.learning_events,
             "network": self.network.get_stats(),
@@ -312,6 +299,8 @@ class NIBrain:
             "oscillations": self.oscillations.get_state(),
             "attention": self.thalamus.get_state(),
             "neuromodulation": self.neuromodulation.get_state(),
+            "prediction_errors": len(self.prediction_errors),
+            "predictions_learned": len(self.predictions),
         }
 
     def __repr__(self):

@@ -178,7 +178,7 @@ class OscillationSystem:
     def get_state(self) -> dict:
         """Get current oscillation state."""
         return {
-            wave_type.value.name: {
+            wave_type.name: {
                 'frequency': osc.frequency,
                 'amplitude': osc.amplitude,
                 'phase': osc.phase,
@@ -188,5 +188,5 @@ class OscillationSystem:
         }
 
     def __repr__(self):
-        active = [f"{wt.value.name}={osc.amplitude:.2f}" for wt, osc in self.oscillations.items()]
+        active = [f"{wt.name}={osc.amplitude:.2f}" for wt, osc in self.oscillations.items()]
         return f"Oscillations({', '.join(active)}, coherence={self.coherence:.2f})"

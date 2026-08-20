@@ -172,7 +172,7 @@ class EmotionalSystem:
     def get_emotional_state(self) -> dict:
         """Get current emotional state as a vector."""
         return {
-            emotion.value.name: level
+            emotion.name: level
             for emotion, level in self.current_emotions.items()
         }
 
@@ -187,7 +187,7 @@ class EmotionalSystem:
 
     def __repr__(self):
         active = [
-            f"{et.value.name}={level:.2f}"
+            f"{et.name}={level:.2f}"
             for et, level in self.current_emotions.items()
             if abs(level) > 0.1
         ]
