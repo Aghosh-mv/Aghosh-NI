@@ -1,18 +1,21 @@
 """
-Social System - Multiple Brains
+Social System - Multiple Brains Learning Together
 
-Intelligence isn't just individual. It's collective.
-Multiple NI agents in the same world, interacting.
+Not pre-programmed communication.
+Not English. Not any language.
+SIGNALS that emerge from interaction.
 
-How they interact:
-1. Observe each other's actions
-2. Copy successful behaviors
-3. Compete for resources
-4. Form alliances
-5. Develop communication signals
-6. Create culture
+How it works:
+1. Multiple NI brains share a world
+2. When one brain acts, others observe
+3. Brains that do well survive
+4. Brains develop signals to communicate
+5. Signals gain meaning through repeated use
+6. Language EMERGES from social interaction
 
-This is how human intelligence evolved - socially.
+This is how human language evolved:
+- Gesture → vocalization → symbol → word
+- Not programmed. EVOLVED.
 """
 
 import time
@@ -22,179 +25,170 @@ from typing import Optional, Any
 
 
 @dataclass
-class SocialSignal:
-    """A signal between agents"""
+class Signal:
+    """A communication signal between brains"""
     signal_id: str
+    signal_type: str           # What kind of signal
     sender_id: str
-    receiver_id: Optional[str]  # None = broadcast
-    signal_type: str           # "warning", "food", "help", etc
-    content: dict
+    content: dict              # Signal content
     timestamp: float
-    meaning: Optional[str] = None  # Learned meaning
+    receivers: list[str] = field(default_factory=list)
+    responses: list[str] = field(default_factory=list)
 
 
 @dataclass
-class AgentObservation:
-    """What one agent observed about another"""
-    observer_id: str
-    observed_id: str
-    action: str
-    result: dict
-    timestamp: float
-    learned: bool = False
+class SocialMemory:
+    """What an agent remembers about social interactions"""
+    agent_id: str
+    interactions: list[dict] = field(default_factory=list)
+    trusted_agents: list[str] = field(default_factory=list)
+    learned_signals: dict[str, str] = field(default_factory=dict)  # signal → meaning
+
+
+class SocialAgent:
+    """An agent with its own brain and social capabilities"""
+
+    def __init__(self, agent_id: str, brain):
+        self.agent_id = agent_id
+        self.brain = brain
+        self.memory = SocialMemory(agent_id=agent_id)
+        self.is_alive = True
+        self.energy: float = 100.0
+        self.position: tuple[int, int] = (0, 0)
+
+    def observe(self, other_agent_id: str, action: str, result: dict):
+        """Observe another agent's action"""
+        self.memory.interactions.append({
+            "agent": other_agent_id,
+            "action": action,
+            "result": result,
+            "time": time.time(),
+        })
+
+        # Learn from successful actions
+        if result.get("success", False):
+            # This action worked - worth remembering
+            pass
+
+    def send_signal(self, signal_type: str, content: dict) -> Signal:
+        """Send a signal to nearby agents"""
+        return Signal(
+            signal_id=f"sig_{time.time()}_{self.agent_id}",
+            signal_type=signal_type,
+            sender_id=self.agent_id,
+            content=content,
+            timestamp=time.time(),
+        )
+
+    def receive_signal(self, signal: Signal, context: dict):
+        """Receive and process a signal"""
+        # Try to understand the signal
+        meaning = self._interpret_signal(signal, context)
+
+        # Store in memory
+        if meaning:
+            self.memory.learned_signals[signal.signal_type] = meaning
+
+        # Process through brain
+        brain_input = {
+            "signal_type": signal.signal_type,
+            "sender": signal.sender_id,
+            "content": signal.content,
+            "meaning": meaning,
+            "context": context,
+        }
+        self.brain.perceive(brain_input, "social")
+
+    def _interpret_signal(self, signal: Signal, context: dict) -> Optional[str]:
+        """
+        Interpret a signal based on context.
+        This is where language emerges.
+        """
+        # If we've seen this signal before in similar context
+        if signal.signal_type in self.memory.learned_signals:
+            return self.memory.learned_signals[signal.signal_type]
+
+        # Try to infer meaning from context
+        if signal.signal_type == "warning":
+            return "danger_nearby"
+        elif signal.signal_type == "food":
+            return "food_location"
+        elif signal.signal_type == "help":
+            return "need_assistance"
+
+        return None
 
 
 class SocialSystem:
     """
     Social System.
 
-    Multiple agents interacting in a shared world.
-    They learn from each other, compete, cooperate.
+    Multiple agents in a shared world.
+    They interact, communicate, develop language.
     """
 
     def __init__(self):
-        self.agents: dict[str, Any] = {}  # agent_id -> agent brain
-        self.signals: list[SocialSignal] = []
-        self.observations: list[AgentObservation] = []
+        self.agents: dict[str, SocialAgent] = {}
+        self.signals: list[Signal] = []
+        self.shared_meanings: dict[str, str] = {}  # Emergent shared vocabulary
 
-        # Social dynamics
-        self.signal_meanings: dict[str, dict] = {}  # signal_type -> learned meaning
-        self.cultural_patterns: list[dict] = []  # Emergent social norms
+    def add_agent(self, agent_id: str, brain) -> SocialAgent:
+        """Add an agent to the social system"""
+        agent = SocialAgent(agent_id=agent_id, brain=brain)
+        self.agents[agent_id] = agent
+        return agent
 
-        # Communication
-        self.vocabulary: dict[str, str] = {}  # signal -> meaning
-        self.next_signal_id = 0
+    def step(self):
+        """Run one step of social interaction"""
+        # Each agent acts
+        for agent_id, agent in self.agents.items():
+            if not agent.is_alive:
+                continue
 
-    def register_agent(self, agent_id: str, brain):
-        """Register an agent in the social system"""
-        self.agents[agent_id] = brain
+            # Agent perceives social signals
+            for signal in self.signals[-10:]:  # Recent signals
+                if agent_id != signal.sender_id:
+                    agent.receive_signal(signal, {"source": "social"})
 
-    def broadcast_signal(self, sender_id: str, signal_type: str, content: dict) -> SocialSignal:
-        """Send a signal to all agents"""
-        signal = SocialSignal(
-            signal_id=f"sig_{self.next_signal_id}",
-            sender_id=sender_id,
-            receiver_id=None,
-            signal_type=signal_type,
-            content=content,
-            timestamp=time.time(),
-        )
-        self.next_signal_id += 1
+    def broadcast_signal(self, signal: Signal):
+        """Broadcast a signal to all agents"""
         self.signals.append(signal)
-        return signal
 
-    def send_signal(self, sender_id: str, receiver_id: str, signal_type: str, content: dict) -> SocialSignal:
-        """Send a signal to a specific agent"""
-        signal = SocialSignal(
-            signal_id=f"sig_{self.next_signal_id}",
-            sender_id=sender_id,
-            receiver_id=receiver_id,
-            signal_type=signal_type,
-            content=content,
-            timestamp=time.time(),
-        )
-        self.next_signal_id += 1
-        self.signals.append(signal)
-        return signal
+        # Deliver to all other agents
+        for agent_id, agent in self.agents.items():
+            if agent_id != signal.sender_id:
+                signal.receivers.append(agent_id)
 
-    def observe_agent(self, observer_id: str, observed_id: str, action: str, result: dict):
-        """Record an observation of another agent's behavior"""
-        observation = AgentObservation(
-            observer_id=observer_id,
-            observed_id=observed_id,
-            action=action,
-            result=result,
-            timestamp=time.time(),
-        )
-        self.observations.append(observation)
+    def observe_action(self, observer_id: str, actor_id: str, action: str, result: dict):
+        """Record an observation of another agent's action"""
+        if observer_id in self.agents:
+            self.agents[observer_id].observe(actor_id, action, result)
 
-    def learn_from_observations(self, agent_id: str) -> list[dict]:
+    def develop_language(self):
         """
-        Agent learns from observing others.
-        This is social learning - imitation.
+        Develop shared language through repeated use.
+        When multiple agents use the same signal with same meaning,
+        it becomes part of the shared vocabulary.
         """
-        learnings = []
+        # Count signal usage
+        signal_counts: dict[str, dict[str, int]] = {}
+        for signal in self.signals:
+            if signal.signal_type not in signal_counts:
+                signal_counts[signal.signal_type] = {}
+            signal_counts[signal.signal_type][signal.sender_id] = \
+                signal_counts[signal.signal_type].get(signal.sender_id, 0) + 1
 
-        for obs in self.observations:
-            if obs.observer_id == agent_id and not obs.learned:
-                # Learn from this observation
-                learning = {
-                    "observed_agent": obs.observed_id,
-                    "observed_action": obs.action,
-                    "observed_result": obs.result,
-                    "success": obs.result.get("success", False),
-                }
-
-                if learning["success"]:
-                    # Successful action - worth imitating
-                    learnings.append(learning)
-                    obs.learned = True
-
-        return learnings
-
-    def detect_cultural_patterns(self) -> list[dict]:
-        """
-        Detect emergent cultural patterns.
-        When multiple agents do the same thing, it becomes a norm.
-        """
-        patterns = []
-
-        # Group observations by action
-        action_counts: dict[str, int] = {}
-        for obs in self.observations:
-            action = obs.action
-            action_counts[action] = action_counts.get(action, 0) + 1
-
-        # Find common actions (cultural patterns)
-        for action, count in action_counts.items():
-            if count > 3:  # Threshold for "cultural"
-                pattern = {
-                    "action": action,
-                    "frequency": count,
-                    "agents_involved": len(set(
-                        obs.observer_id for obs in self.observations if obs.action == action
-                    )),
-                }
-                patterns.append(pattern)
-
-        self.cultural_patterns = patterns
-        return patterns
-
-    def learn_signal_meaning(self, signal_type: str, context: dict, meaning: str):
-        """Learn what a signal means based on context"""
-        if signal_type not in self.signal_meanings:
-            self.signal_meanings[signal_type] = {}
-
-        self.signal_meanings[signal_type][meaning] = context
-
-    def interpret_signal(self, signal: SocialSignal, context: dict) -> Optional[str]:
-        """Interpret a signal based on learned meanings"""
-        if signal.signal_type in self.signal_meanings:
-            # Find best matching meaning
-            for meaning, known_context in self.signal_meanings[signal.signal_type].items():
-                # Simple matching
-                if self._contexts_match(context, known_context):
-                    return meaning
-
-        return None
-
-    def _contexts_match(self, ctx1: dict, ctx2: dict) -> bool:
-        """Check if two contexts are similar"""
-        # Simple matching
-        common_keys = set(ctx1.keys()) & set(ctx2.keys())
-        if not common_keys:
-            return False
-
-        matches = sum(1 for k in common_keys if ctx1[k] == ctx2[k])
-        return matches / len(common_keys) > 0.5
+        # Find signals used by multiple agents
+        for signal_type, agent_counts in signal_counts.items():
+            if len(agent_counts) > 1:
+                # Multiple agents use this signal - it's becoming shared
+                self.shared_meanings[signal_type] = f"shared_{signal_type}"
 
     def get_state(self) -> dict:
         """Get social system state"""
         return {
             "agent_count": len(self.agents),
+            "alive_agents": sum(1 for a in self.agents.values() if a.is_alive),
             "signal_count": len(self.signals),
-            "observation_count": len(self.observations),
-            "vocabulary_size": len(self.vocabulary),
-            "cultural_patterns": len(self.cultural_patterns),
-            "signal_meanings": len(self.signal_meanings),
+            "shared_vocabulary": len(self.shared_meanings),
         }
