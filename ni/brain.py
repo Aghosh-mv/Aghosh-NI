@@ -12,6 +12,7 @@ Components:
 - MemorySystem: Hippocampus + Neocortex + Cerebellum
 - Thalamus: Attention routing
 - PredictiveCoding: Error-driven learning
+- DreamSystem: Active imagination
 
 Behavior EMERGES from mechanisms interacting.
 No central controller. No token prediction.
@@ -25,6 +26,7 @@ from .core.neuromodulation import NeuromodulationSystem, Modulator
 from .oscillation.oscillator import OscillationSystem, WaveType
 from .emotion.amygdala import EmotionalSystem, EmotionType
 from .memory.system import MemorySystem
+from .memory.dreams import DreamSystem
 from .attention.thalamus import Thalamus
 
 
@@ -47,6 +49,7 @@ class NIBrain:
         self.emotions = EmotionalSystem()
         self.memory = MemorySystem()
         self.thalamus = Thalamus()
+        self.dreams = DreamSystem()
 
         # Predictive coding system
         self.predictions: dict[str, float] = {}
@@ -60,6 +63,9 @@ class NIBrain:
         # Experience counter
         self.experience_count = 0
         self.learning_events = 0
+
+        # Current beliefs about the world
+        self.world_model: dict[str, Any] = {}
 
     def perceive(self, input_data: dict, source: str = "external") -> dict:
         """
@@ -107,8 +113,19 @@ class NIBrain:
         emotional_weight = self._compute_emotional_weight(input_data, error)
         self.memory.experience(input_data, emotional_weight)
 
-        # 7. Update predictions (learn from error)
+        # 7. Buffer for dreams
+        self.dreams.buffer_experience({
+            "input": input_data,
+            "prediction": prediction,
+            "error": error,
+            "source": source,
+        })
+
+        # 8. Update predictions (learn from error)
         self._update_predictions(input_data, error)
+
+        # 9. Update world model
+        self._update_world_model(input_data, error)
 
         self.experience_count += 1
 
@@ -123,8 +140,9 @@ class NIBrain:
         for key, value in input_data.items():
             if key in self.predictions:
                 prediction[key] = self.predictions[key]
+            elif key in self.world_model:
+                prediction[key] = self.world_model[key]
             else:
-                # No prior prediction - predict mean
                 prediction[key] = 0.0
         return prediction
 
@@ -162,7 +180,6 @@ class NIBrain:
 
             # Error drives neural activity
             if isinstance(value, (int, float)):
-                # Larger error = more neural activity
                 self.network.stimulate(neuron_id, error * 10.0)
 
         # Run network dynamics
@@ -200,7 +217,6 @@ class NIBrain:
         """Compute emotional tags based on prediction error"""
         tags = []
 
-        # High prediction error = novelty/surprise
         if error > 0.5:
             tag = self.emotions.tag_experience(
                 EmotionType.NOVELTY,
@@ -209,7 +225,6 @@ class NIBrain:
             )
             tags.append(tag)
 
-        # Very high error = potential threat/reward
         if error > 0.8:
             tag = self.emotions.tag_experience(
                 EmotionType.CURIOSITY,
@@ -222,14 +237,11 @@ class NIBrain:
 
     def _update_neuromodulation(self, error: float):
         """Update neuromodulation based on prediction error"""
-        # Norepinephrine: increases with surprise
         self.neuromodulation.release(Modulator.NOREPINEPHRINE, error * 0.3)
 
-        # Acetylcholine: increases when we should learn
         if error > 0.3:
             self.neuromodulation.release(Modulator.ACETYLCHOLINE, 0.3)
 
-        # Apply to network
         plasticity_rate = self.neuromodulation.get_plasticity_rate()
         for synapse in self.network.synapses.values():
             synapse.plasticity_rate = plasticity_rate
@@ -246,18 +258,21 @@ class NIBrain:
     def _update_predictions(self, input_data: dict, error: float):
         """
         Update predictions based on prediction error.
-        This is HOW the brain learns:
-        - Predict
-        - Compare with reality
-        - Update prediction to reduce future error
+        This is HOW the brain learns.
         """
         learning_rate = self.neuromodulation.get_plasticity_rate() * 0.1
 
         for key, value in input_data.items():
             if isinstance(value, (int, float)):
                 current_pred = self.predictions.get(key, 0.0)
-                # Move prediction toward actual value
                 self.predictions[key] = current_pred + learning_rate * (value - current_pred)
+
+    def _update_world_model(self, input_data: dict, error: float):
+        """Update internal model of the world"""
+        for key, value in input_data.items():
+            if isinstance(value, (int, float)):
+                current = self.world_model.get(key, 0.0)
+                self.world_model[key] = current + 0.05 * (value - current)
 
     def think(self, duration_ms: float = 100.0) -> dict:
         """
@@ -284,6 +299,30 @@ class NIBrain:
             "emotional_state": self.emotions.get_dominant_emotion().name,
         }
 
+    def sleep(self, dream_duration: int = 5) -> dict:
+        """
+        Sleep and dream.
+        Brain consolidates memories and generates new scenarios.
+        """
+        self.awake = False
+
+        # Dream
+        dream_result = self.dreams.dream(dream_duration)
+
+        # Consolidate memories
+        consolidation = self.dreams.consolidate()
+
+        # Consolidate brain memories
+        self.memory.consolidate()
+
+        self.awake = True
+
+        return {
+            "status": "woke_up",
+            "dreams": dream_result,
+            "consolidation": consolidation,
+        }
+
     def get_state(self) -> dict:
         """Get complete brain state"""
         return {
@@ -295,12 +334,14 @@ class NIBrain:
             "learning_events": self.learning_events,
             "network": self.network.get_stats(),
             "memory": self.memory.get_stats(),
+            "dreams": self.dreams.get_state(),
             "emotions": self.emotions.get_emotional_state(),
             "oscillations": self.oscillations.get_state(),
             "attention": self.thalamus.get_state(),
             "neuromodulation": self.neuromodulation.get_state(),
             "prediction_errors": len(self.prediction_errors),
             "predictions_learned": len(self.predictions),
+            "world_model_size": len(self.world_model),
         }
 
     def __repr__(self):
